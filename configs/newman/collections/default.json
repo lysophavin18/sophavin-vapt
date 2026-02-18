@@ -1,0 +1,168 @@
+{
+  "info": {
+    "name": "Noovastack-VAPT Default API Security Collection",
+    "description": "Default API security tests for common vulnerabilities",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Version Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/version",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "version"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Response time is acceptable', function () {",
+              "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Security Headers Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/",
+          "host": ["{{baseUrl}}"],
+          "path": [""]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Has X-Content-Type-Options header', function () {",
+              "    pm.response.to.have.header('X-Content-Type-Options');",
+              "});",
+              "",
+              "pm.test('Has X-Frame-Options header', function () {",
+              "    pm.response.to.have.header('X-Frame-Options');",
+              "});",
+              "",
+              "pm.test('Has Strict-Transport-Security header', function () {",
+              "    pm.response.to.have.header('Strict-Transport-Security');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CORS Check",
+      "request": {
+        "method": "OPTIONS",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "https://evil.com"
+          },
+          {
+            "key": "Access-Control-Request-Method",
+            "value": "GET"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api",
+          "host": ["{{baseUrl}}"],
+          "path": ["api"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('CORS should not allow arbitrary origins', function () {",
+              "    var allowOrigin = pm.response.headers.get('Access-Control-Allow-Origin');",
+              "    pm.expect(allowOrigin).to.not.equal('*');",
+              "    pm.expect(allowOrigin).to.not.equal('https://evil.com');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth Endpoint - Invalid Credentials",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"wrongpassword\"}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "login"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 401 for invalid credentials', function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([401, 403, 400]);",
+              "});",
+              "",
+              "pm.test('Does not reveal password in response', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('wrongpassword');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    }
+  ]
+}

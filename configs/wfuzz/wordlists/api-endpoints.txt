@@ -1,0 +1,123 @@
+# API Endpoints Wordlist for wfuzz
+# Common REST API endpoints
+
+# Authentication
+api/auth
+api/login
+api/logout
+api/register
+api/signup
+api/token
+api/refresh
+api/oauth
+api/oauth2
+api/session
+api/sessions
+api/password
+api/reset-password
+api/forgot-password
+
+# User Management
+api/users
+api/user
+api/me
+api/profile
+api/account
+api/accounts
+api/members
+api/admin
+api/admins
+
+# Common Resources
+api/v1
+api/v2
+api/v3
+api/data
+api/items
+api/products
+api/orders
+api/posts
+api/comments
+api/files
+api/upload
+api/uploads
+api/download
+api/downloads
+api/images
+api/media
+api/documents
+api/settings
+api/config
+api/configuration
+
+# Common Operations
+api/search
+api/query
+api/filter
+api/list
+api/create
+api/update
+api/delete
+api/export
+api/import
+api/sync
+api/status
+api/health
+api/ping
+api/info
+api/version
+api/debug
+api/test
+api/logs
+
+# GraphQL
+graphql
+graphiql
+api/graphql
+api/graphiql
+playground
+api/playground
+
+# Documentation
+swagger
+swagger.json
+swagger.yaml
+api-docs
+api/docs
+openapi
+openapi.json
+openapi.yaml
+redoc
+
+# Internal/Debug
+internal
+debug
+dev
+development
+staging
+test
+actuator
+metrics
+prometheus
+healthz
+readyz
+livez
+env
+environment
+
+# Admin Panels
+admin
+admin/api
+administrator
+management
+dashboard
+console
+panel
+
+# Common Directories
+public
+private
+static
+assets
+resources
+content

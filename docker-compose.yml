@@ -1,0 +1,751 @@
+# Noovastack-VAPT Docker Compose - Production Configuration
+# Version: 1.0.0
+# Author: Noovastack Security Team
+
+version: '3.9'
+
+# ============================================================================
+# NETWORKS - Isolated network segments for security
+# ============================================================================
+networks:
+  noovastack-frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+  
+  noovastack-backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.1.0/24
+  
+  noovastack-scanners:
+    driver: bridge
+    internal: true  # No external access - isolated scanner network
+    ipam:
+      config:
+        - subnet: 172.28.2.0/24
+
+# ============================================================================
+# VOLUMES - Persistent storage
+# ============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  openvas_data:
+    driver: local
+  scan_results:
+    driver: local
+  reports:
+    driver: local
+  nuclei_templates:
+    driver: local
+  # Container security volumes
+  trivy_cache:
+    driver: local
+  clair_data:
+    driver: local
+  # Cloud/IaC scanning volumes
+  iac_scan_data:
+    driver: local
+
+# ============================================================================
+# SERVICES
+# ============================================================================
+services:
+  # --------------------------------------------------------------------------
+  # NGINX - Reverse Proxy & SSL Termination
+  # --------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: noovastack-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./configs/nginx/ssl:/etc/nginx/ssl:ro
+      - ./frontend/build:/usr/share/nginx/html:ro
+    networks:
+      - noovastack-frontend
+    depends_on:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # --------------------------------------------------------------------------
+  # FRONTEND - React Web Application
+  # --------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: noovastack-frontend
+    restart: unless-stopped
+    environment:
+      - REACT_APP_API_URL=/api
+      - NODE_ENV=production
+    networks:
+      - noovastack-frontend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # BACKEND - FastAPI Application
+  # --------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: noovastack-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://noovastack:${DB_PASSWORD}@postgres:5432/noovastack_vapt
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+      - RATE_LIMIT_SCANS=10
+      - RATE_LIMIT_WINDOW=3600
+    volumes:
+      - scan_results:/app/results:ro
+      - reports:/app/reports
+      - ./backend/logs:/app/logs
+    networks:
+      - noovastack-frontend
+      - noovastack-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # POSTGRESQL - Primary Database
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: noovastack-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=noovastack
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=noovastack_vapt
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - noovastack-backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noovastack -d noovastack_vapt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # REDIS - Message Queue & Cache
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: noovastack-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - noovastack-backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # ORCHESTRATOR - Celery Worker for Scan Coordination
+  # --------------------------------------------------------------------------
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: noovastack-orchestrator
+    restart: unless-stopped
+    command: celery -A tasks worker --loglevel=INFO --concurrency=2 -Q scans,high_priority
+    environment:
+      - DATABASE_URL=postgresql://noovastack:${DB_PASSWORD}@postgres:5432/noovastack_vapt
+      - REDIS_URL=redis://redis:6379/0
+      - OPENVAS_HOST=openvas
+      - OPENVAS_PORT=9392
+      - OPENVAS_USER=admin
+      - OPENVAS_PASSWORD=${OPENVAS_PASSWORD}
+      - ZAP_HOST=zap
+      - ZAP_PORT=8080
+      - ZAP_API_KEY=${ZAP_API_KEY}
+      - MAX_CPU_PERCENT=80
+      - MAX_RAM_PERCENT=85
+      - SCAN_TIMEOUT=7200
+    volumes:
+      - scan_results:/app/results
+      - reports:/app/reports
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - noovastack-backend
+      - noovastack-scanners
+    depends_on:
+      - redis
+      - postgres
+      - openvas
+      - zap
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+
+  # --------------------------------------------------------------------------
+  # CELERY BEAT - Scheduled Tasks
+  # --------------------------------------------------------------------------
+  celery-beat:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: noovastack-celery-beat
+    restart: unless-stopped
+    command: celery -A tasks beat --loglevel=INFO
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    networks:
+      - noovastack-backend
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  # --------------------------------------------------------------------------
+  # OPENVAS / GREENBONE - Network Vulnerability Scanner
+  # --------------------------------------------------------------------------
+  openvas:
+    image: greenbone/community-container:stable
+    container_name: noovastack-openvas
+    restart: unless-stopped
+    environment:
+      - OPENVAS_PASSWORD=${OPENVAS_PASSWORD}
+      - GVM_ADMIN_PASSWORD=${OPENVAS_PASSWORD}
+    volumes:
+      - openvas_data:/var/lib/openvas
+      - ./configs/openvas/openvas.conf:/etc/openvas/openvas.conf:ro
+    networks:
+      - noovastack-scanners
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9392/login"]
+      interval: 60s
+      timeout: 30s
+      retries: 10
+      start_period: 300s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+  # --------------------------------------------------------------------------
+  # OWASP ZAP - Web Application Security Scanner
+  # --------------------------------------------------------------------------
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: noovastack-zap
+    restart: unless-stopped
+    command: zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.key=${ZAP_API_KEY} -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true
+    environment:
+      - ZAP_API_KEY=${ZAP_API_KEY}
+    volumes:
+      - ./configs/zap:/zap/wrk:rw
+    networks:
+      - noovastack-scanners
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/JSON/core/view/version/?apikey=${ZAP_API_KEY}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  # --------------------------------------------------------------------------
+  # NUCLEI - Template-based Vulnerability Scanner
+  # --------------------------------------------------------------------------
+  nuclei:
+    image: projectdiscovery/nuclei:latest
+    container_name: noovastack-nuclei
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - nuclei_templates:/root/nuclei-templates
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # NMAP - Network Scanner (executes via orchestrator)
+  # --------------------------------------------------------------------------
+  nmap:
+    image: instrumentisto/nmap:latest
+    container_name: noovastack-nmap
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # --------------------------------------------------------------------------
+  # NIKTO - Web Server Scanner
+  # --------------------------------------------------------------------------
+  nikto:
+    image: sullo/nikto:latest
+    container_name: noovastack-nikto
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # --------------------------------------------------------------------------
+  # SQLMAP - SQL Injection Scanner
+  # --------------------------------------------------------------------------
+  sqlmap:
+    image: paoloo/sqlmap:latest
+    container_name: noovastack-sqlmap
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ==========================================================================
+  # CONTAINER SECURITY TOOLS
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # TRIVY - Container Image Vulnerability Scanner
+  # --------------------------------------------------------------------------
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: noovastack-trivy
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - trivy_cache:/root/.cache
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # DOCKER-BENCH - CIS Docker Benchmark Security Audit
+  # --------------------------------------------------------------------------
+  docker-bench:
+    image: docker/docker-bench-security:latest
+    container_name: noovastack-docker-bench
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc:/etc:ro
+      - /var/lib:/var/lib:ro
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    cap_add:
+      - audit_control
+    labels:
+      - docker_bench_security
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # CLAIR - Static Container Vulnerability Analysis
+  # --------------------------------------------------------------------------
+  clair:
+    image: quay.io/projectquay/clair:4.7.2
+    container_name: noovastack-clair
+    restart: unless-stopped
+    environment:
+      - CLAIR_MODE=combo
+      - CLAIR_CONF=/config/config.yaml
+    volumes:
+      - ./configs/clair:/config:ro
+      - clair_data:/var/lib/clair
+    networks:
+      - noovastack-scanners
+      - noovastack-backend
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6060/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # FALCO - Container Runtime Security Monitoring
+  # --------------------------------------------------------------------------
+  falco:
+    image: falcosecurity/falco:latest
+    container_name: noovastack-falco
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /dev:/host/dev:ro
+      - /proc:/host/proc:ro
+      - /boot:/host/boot:ro
+      - /lib/modules:/host/lib/modules:ro
+      - /etc:/host/etc:ro
+      - ./configs/falco:/etc/falco:ro
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ==========================================================================
+  # CLOUD SECURITY TOOLS
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # SCOUTSUITE - Multi-Cloud Security Auditing (AWS/Azure/GCP)
+  # --------------------------------------------------------------------------
+  scoutsuite:
+    image: rossja/ncc-scoutsuite:latest
+    container_name: noovastack-scoutsuite
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID:-}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID:-}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
+    volumes:
+      - scan_results:/results
+      - ./configs/cloud:/app/config:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # PROWLER - AWS Security Best Practices Assessment
+  # --------------------------------------------------------------------------
+  prowler:
+    image: toniblyx/prowler:latest
+    container_name: noovastack-prowler
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+    volumes:
+      - scan_results:/results
+      - ./configs/cloud/aws:/root/.aws:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # CHECKOV - Infrastructure as Code Security Scanner
+  # --------------------------------------------------------------------------
+  checkov:
+    image: bridgecrew/checkov:latest
+    container_name: noovastack-checkov
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+      - iac_scan_data:/iac:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # --------------------------------------------------------------------------
+  # TERRASCAN - IaC Policy Enforcement
+  # --------------------------------------------------------------------------
+  terrascan:
+    image: tenable/terrascan:latest
+    container_name: noovastack-terrascan
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+      - iac_scan_data:/iac:ro
+      - ./configs/terrascan:/config:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ==========================================================================
+  # KUBERNETES SECURITY TOOLS
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # KUBE-HUNTER - Kubernetes Cluster Penetration Testing
+  # --------------------------------------------------------------------------
+  kube-hunter:
+    image: aquasec/kube-hunter:latest
+    container_name: noovastack-kube-hunter
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    environment:
+      - KUBECONFIG=/root/.kube/config
+    volumes:
+      - scan_results:/results
+      - ./configs/kubernetes:/root/.kube:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # KUBE-BENCH - CIS Kubernetes Benchmark
+  # --------------------------------------------------------------------------
+  kube-bench:
+    image: aquasec/kube-bench:latest
+    container_name: noovastack-kube-bench
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    environment:
+      - KUBECONFIG=/root/.kube/config
+    volumes:
+      - scan_results:/results
+      - ./configs/kubernetes:/root/.kube:ro
+      - /var/lib/kubelet:/var/lib/kubelet:ro
+      - /etc/kubernetes:/etc/kubernetes:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # ==========================================================================
+  # API SECURITY TOOLS
+  # ==========================================================================
+
+  # --------------------------------------------------------------------------
+  # ARJUN - HTTP Parameter Discovery
+  # --------------------------------------------------------------------------
+  arjun:
+    image: s0md3v/arjun:latest
+    container_name: noovastack-arjun
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # GRAPHQLMAP - GraphQL Security Scanner
+  # --------------------------------------------------------------------------
+  graphqlmap:
+    build:
+      context: ./dockerfiles/graphqlmap
+      dockerfile: Dockerfile
+    container_name: noovastack-graphqlmap
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # JWT_TOOL - JWT Analysis and Attack Tool
+  # --------------------------------------------------------------------------
+  jwt-tool:
+    build:
+      context: ./dockerfiles/jwt-tool
+      dockerfile: Dockerfile
+    container_name: noovastack-jwt-tool
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+
+  # --------------------------------------------------------------------------
+  # WFUZZ - Web Fuzzer for API Endpoints
+  # --------------------------------------------------------------------------
+  wfuzz:
+    image: ghcr.io/xmendez/wfuzz:latest
+    container_name: noovastack-wfuzz
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+      - ./configs/wfuzz/wordlists:/wordlists:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # POSTMAN/NEWMAN - API Collection Testing
+  # --------------------------------------------------------------------------
+  newman:
+    image: postman/newman:latest
+    container_name: noovastack-newman
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+      - ./configs/newman/collections:/collections:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+# ============================================================================
+# ENVIRONMENT VARIABLES (create .env file)
+# ============================================================================
+# DB_PASSWORD=your_secure_postgres_password
+# SECRET_KEY=your_app_secret_key_256_bits
+# JWT_SECRET=your_jwt_secret_key_256_bits
+# OPENVAS_PASSWORD=your_openvas_admin_password
+# ZAP_API_KEY=your_zap_api_key
