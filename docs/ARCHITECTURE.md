@@ -1,4 +1,4 @@
-# Noovastack-VAPT Architecture
+# S VAPT Architecture
 
 ## System Overview
 
