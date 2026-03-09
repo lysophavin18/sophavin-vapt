@@ -99,8 +99,8 @@ AI_TEMPERATURE=0.3
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/noovastack-vapt.git
-cd noovastack-vapt
+git clone https://github.com/your-org/sophavin-vapt.git
+cd sophavin-vapt
 
 # Configure environment
 cp .env.example .env
