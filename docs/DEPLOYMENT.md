@@ -1,4 +1,4 @@
-# Noovastack VAPT Deployment Guide
+# VAPT Deployment Guide
 
 ## Table of Contents
 1. [VM Requirements](#vm-requirements)
