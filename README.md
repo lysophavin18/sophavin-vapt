@@ -33,7 +33,7 @@ A production-ready, containerized vulnerability scanning platform that orchestra
 
 ## AI Integration
 
-Noovastack-VAPT includes an AI-powered security assistant that provides intelligent analysis of scan results.
+S-VAPT includes an AI-powered security assistant that provides intelligent analysis of scan results.
 
 ### Supported Providers
 
@@ -328,4 +328,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - Documentation: [docs/](docs/)
 - Issues: GitHub Issues
-- Security: security@your-org.com
+- Security: sophavinly18
