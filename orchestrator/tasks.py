@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT Scan Orchestrator
+S-VAPT Scan Orchestrator
 Celery-based scan execution pipeline
 """
 
