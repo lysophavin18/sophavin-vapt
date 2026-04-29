@@ -148,84 +148,19 @@ const RecentScanItem: React.FC<ScanItemProps> = ({ scan }) => {
   );
 };
 
-const getDisplayProgress = (scan: { status: string; progress: number }) => {
-  if (scan.status === 'completed') return 100;
-  if (scan.status === 'queued') return Math.max(scan.progress || 0, 5);
-  if (scan.status === 'pending') return Math.max(scan.progress || 0, 2);
-  return scan.progress || 0;
-};
-
-const ActiveScanItem: React.FC<ScanItemProps> = ({ scan }) => {
-  const navigate = useNavigate();
-  const progress = getDisplayProgress(scan);
-
-  return (
-    <Card
-      sx={{ mb: 1, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-      onClick={() => navigate(`/scan/${scan.scan_id}`)}
-    >
-      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
-        <Stack spacing={1}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body1" fontWeight="medium" noWrap>
-                {scan.target_value}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {format(new Date(scan.created_at), 'MMM d, yyyy HH:mm')}
-              </Typography>
-            </Box>
-            <ScanStatusChip status={scan.status} />
-          </Stack>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <LinearProgress
-              variant="determinate"
-              value={progress}
-              sx={{ flex: 1, height: 8, borderRadius: 1 }}
-            />
-            <Typography variant="caption" color="text.secondary" sx={{ width: 40, textAlign: 'right' }}>
-              {progress}%
-            </Typography>
-          </Stack>
-        </Stack>
-      </CardContent>
-    </Card>
-  );
-};
-
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
 
-  const { data: scansData, isLoading, refetch } = useQuery({
-    queryKey: ['dashboard-scans'],
-    queryFn: () => api.get('/api/v1/scans/', { params: { page: 1, page_size: 50 } }).then((res: { data: any }) => res.data),
-    refetchInterval: 5000,
+  // Fetch dashboard stats
+  const { data: stats, isLoading, refetch } = useQuery({
+    queryKey: ['dashboard-stats'],
+    queryFn: () => api.get('/api/v1/dashboard/stats').then((res) => res.data),
+    refetchInterval: (data: any) => {
+      // Poll every 5 s when there are active scans, otherwise every 30 s
+      const activeScans = data?.active_scans ?? 0;
+      return activeScans > 0 ? 5000 : 30000;
+    },
   });
-
-  const recentScans = scansData?.items || [];
-  const activeScans = recentScans.filter((scan: any) =>
-    ['pending', 'queued', 'running'].includes(scan.status)
-  );
-  const completedScans = recentScans.filter((scan: any) => scan.status === 'completed');
-  const today = new Date().toDateString();
-  const scansToday = recentScans.filter((scan: any) => new Date(scan.created_at).toDateString() === today).length;
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const scansThisWeek = recentScans.filter((scan: any) => new Date(scan.created_at).getTime() >= weekAgo).length;
-
-  const stats = {
-    total_scans: scansData?.total || recentScans.length,
-    scans_today: scansToday,
-    active_scans: activeScans.length,
-    total_findings: recentScans.reduce((sum: number, scan: any) => sum + (scan.total_findings || 0), 0),
-    critical_findings: recentScans.reduce((sum: number, scan: any) => sum + (scan.critical_count || 0), 0),
-    high_findings: recentScans.reduce((sum: number, scan: any) => sum + (scan.high_count || 0), 0),
-    medium_findings: 0,
-    low_findings: 0,
-    info_findings: 0,
-    scans_this_week: scansThisWeek,
-    completed_scans: completedScans.length,
-    recent_scans: recentScans.slice(0, 8),
-  };
 
   // Severity distribution data for pie chart
   const severityData = stats
@@ -303,48 +238,11 @@ const DashboardPage: React.FC = () => {
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="This Week"
-            value={stats.scans_this_week || 0}
+            value={stats?.scans_this_week || 0}
             icon={<HistoryIcon />}
             color="#3b82f6"
-            subtitle={`${stats.completed_scans || 0} completed`}
+            subtitle="scans completed"
           />
-        </Grid>
-      </Grid>
-
-      <Grid container spacing={3} mb={3}>
-        <Grid item xs={12}>
-          <Card>
-            <CardContent>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-                <Box>
-                  <Typography variant="h6">Scanning Progress</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Queued and running scans refresh automatically.
-                  </Typography>
-                </Box>
-                <Chip label={`${activeScans.length} active`} color={activeScans.length ? 'info' : 'default'} />
-              </Stack>
-              {activeScans.length > 0 ? (
-                <Box sx={{ maxHeight: 260, overflow: 'auto' }}>
-                  {activeScans.map((scan: any) => (
-                    <ActiveScanItem key={scan.scan_id} scan={scan} />
-                  ))}
-                </Box>
-              ) : (
-                <Box sx={{ py: 3, textAlign: 'center' }}>
-                  <Typography color="text.secondary">No queued or running scans</Typography>
-                  <Button
-                    variant="outlined"
-                    startIcon={<PlayIcon />}
-                    onClick={() => navigate('/scan')}
-                    sx={{ mt: 2 }}
-                  >
-                    Create Scan
-                  </Button>
-                </Box>
-              )}
-            </CardContent>
-          </Card>
         </Grid>
       </Grid>
 

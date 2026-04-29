@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
 // Create axios instance with base configuration
@@ -73,23 +73,16 @@ export const scansApi = {
     tools?: string[];
     options?: Record<string, any>;
   }) => {
-    const response = await api.post('/api/v1/scans/', data);
+    const response = await api.post('/api/v1/scans', data);
     return response.data;
   },
   
   list: async (params?: {
     page?: number;
     per_page?: number;
-    page_size?: number;
     status?: string;
   }) => {
-    const { per_page, ...rest } = params || {};
-    const response = await api.get('/api/v1/scans/', {
-      params: {
-        ...rest,
-        page_size: rest.page_size ?? per_page,
-      },
-    });
+    const response = await api.get('/api/v1/scans', { params });
     return response.data;
   },
   
