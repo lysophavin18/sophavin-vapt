@@ -2,7 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
-import { useAuthStore } from './hooks/useAuthStore';
+import { useAuthStore } from './stores/authStore';
 
 // Pages
 import LoginPage from './pages/LoginPage';
@@ -121,7 +121,7 @@ function App() {
               <Route
                 path="admin/*"
                 element={
-                  <ProtectedRoute requireAdmin>
+                  <ProtectedRoute requiredRoles={['admin']}>
                     <AdminPage />
                   </ProtectedRoute>
                 }

@@ -13,8 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     nmap \
-    nikto \
-    sqlmap \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

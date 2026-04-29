@@ -49,8 +49,8 @@ const SCAN_TYPES = [
     label: 'Full Scan',
     description: 'Comprehensive vulnerability assessment with all tools',
     icon: <SecurityIcon />,
-    duration: '30-60 minutes',
-    tools: ['nmap', 'openvas', 'nuclei', 'zap', 'nikto', 'sqlmap'],
+    duration: '45-90 minutes',
+    tools: ['nmap', 'openvas', 'nuclei', 'zap', 'nikto', 'wapiti', 'dalfox', 'feroxbuster', 'cmseek', 'sqlmap', 'commix', 'sniper'],
   },
   {
     value: 'web',
@@ -61,12 +61,20 @@ const SCAN_TYPES = [
     tools: ['nuclei', 'zap', 'nikto', 'sqlmap'],
   },
   {
+    value: 'web_dynamic',
+    label: 'Dynamic Web Scan',
+    description: 'Active dynamic testing: XSS, injection, content discovery, CMS analysis',
+    icon: <SecurityIcon />,
+    duration: '30-60 minutes',
+    tools: ['wapiti', 'dalfox', 'feroxbuster', 'cmseek', 'sqlmap', 'commix', 'sniper'],
+  },
+  {
     value: 'container_only',
     label: 'Container Security Scan',
-    description: 'Docker/container image vulnerability scanning',
+    description: 'Docker/container security auditing and runtime monitoring',
     icon: <SecurityIcon />,
     duration: '15-30 minutes',
-    tools: ['trivy', 'docker_bench', 'clair', 'falco'],
+    tools: ['docker_bench', 'clair', 'falco'],
   },
   {
     value: 'cloud_only',
@@ -119,8 +127,14 @@ const AVAILABLE_TOOLS = [
   { id: 'zap', label: 'OWASP ZAP', description: 'Web application security scanner', category: 'web' },
   { id: 'nikto', label: 'Nikto', description: 'Web server scanner', category: 'web' },
   { id: 'sqlmap', label: 'SQLmap', description: 'SQL injection detection', category: 'web' },
+  // Dynamic Web Scanning Tools
+  { id: 'wapiti', label: 'Wapiti', description: 'Web application vulnerability scanner (active)', category: 'dynamic' },
+  { id: 'dalfox', label: 'Dalfox', description: 'Parameter-based XSS scanning', category: 'dynamic' },
+  { id: 'feroxbuster', label: 'Feroxbuster', description: 'Fast content discovery and directory bruteforce', category: 'dynamic' },
+  { id: 'commix', label: 'Commix', description: 'OS command injection testing', category: 'dynamic' },
+  { id: 'cmseek', label: 'CMSeeK', description: 'CMS detection and vulnerability analysis', category: 'dynamic' },
+  { id: 'sniper', label: 'Sn1per', description: 'Automated pentest recon and attack framework', category: 'dynamic' },
   // Container Security Tools
-  { id: 'trivy', label: 'Trivy', description: 'Container image vulnerability scanner', category: 'container' },
   { id: 'docker_bench', label: 'Docker Bench', description: 'Docker CIS benchmark security audit', category: 'container' },
   { id: 'clair', label: 'Clair', description: 'Container vulnerability analysis', category: 'container' },
   { id: 'falco', label: 'Falco', description: 'Runtime security monitoring', category: 'container' },
@@ -151,7 +165,7 @@ const ScanPage: React.FC = () => {
   // Form state
   const [target, setTarget] = useState('');
   const [scanType, setScanType] = useState('full');
-  const [selectedTools, setSelectedTools] = useState<string[]>(['nmap', 'openvas', 'nuclei', 'zap', 'nikto', 'sqlmap']);
+  const [selectedTools, setSelectedTools] = useState<string[]>(['nmap', 'openvas', 'nuclei', 'zap', 'nikto', 'wapiti', 'dalfox', 'feroxbuster', 'cmseek', 'sqlmap', 'commix']);
   const [options, setOptions] = useState({
     aggressive: false,
     followRedirects: true,

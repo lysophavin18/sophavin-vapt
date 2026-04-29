@@ -1,9 +1,9 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
 // Create axios instance with base configuration
 export const api: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: import.meta.env.VITE_API_URL || '',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -40,20 +40,19 @@ api.interceptors.response.use(
 // Auth API
 export const authApi = {
   login: async (username: string, password: string) => {
-    const formData = new URLSearchParams();
-    formData.append('username', username);
-    formData.append('password', password);
-    
-    const response = await api.post('/api/v1/auth/token', formData, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+    const response = await api.post('/api/v1/auth/login', {
+      email: username,
+      password,
     });
     return response.data;
   },
   
-  getMe: async () => {
-    const response = await api.get('/api/v1/users/me');
+  getMe: async (token?: string) => {
+    const response = await api.get('/api/v1/auth/me', token ? {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    } : undefined);
     return response.data;
   },
   
@@ -74,16 +73,23 @@ export const scansApi = {
     tools?: string[];
     options?: Record<string, any>;
   }) => {
-    const response = await api.post('/api/v1/scans', data);
+    const response = await api.post('/api/v1/scans/', data);
     return response.data;
   },
   
   list: async (params?: {
     page?: number;
     per_page?: number;
+    page_size?: number;
     status?: string;
   }) => {
-    const response = await api.get('/api/v1/scans', { params });
+    const { per_page, ...rest } = params || {};
+    const response = await api.get('/api/v1/scans/', {
+      params: {
+        ...rest,
+        page_size: rest.page_size ?? per_page,
+      },
+    });
     return response.data;
   },
   

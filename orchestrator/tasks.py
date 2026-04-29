@@ -58,6 +58,13 @@ celery_app.conf.task_routes = {
     'tasks.run_jwt_tool': {'queue': 'api_scans'},
     'tasks.run_wfuzz': {'queue': 'api_scans'},
     'tasks.run_newman': {'queue': 'api_scans'},
+    # Dynamic Web Scanning Tools
+    'tasks.run_wapiti': {'queue': 'scans'},
+    'tasks.run_dalfox': {'queue': 'scans'},
+    'tasks.run_feroxbuster': {'queue': 'scans'},
+    'tasks.run_commix': {'queue': 'scans'},
+    'tasks.run_cmseek': {'queue': 'scans'},
+    'tasks.run_sniper': {'queue': 'scans'},
     'tasks.aggregate_results': {'queue': 'high_priority'},
     'tasks.generate_report': {'queue': 'high_priority'},
 }
@@ -73,6 +80,35 @@ SessionLocal = sessionmaker(bind=engine)
 MAX_CPU_PERCENT = int(os.environ.get('MAX_CPU_PERCENT', 80))
 MAX_RAM_PERCENT = int(os.environ.get('MAX_RAM_PERCENT', 85))
 SCAN_TIMEOUT = int(os.environ.get('SCAN_TIMEOUT', 7200))
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
+
+
+# =============================================================================
+# TELEGRAM NOTIFICATION
+# =============================================================================
+def send_telegram_notification(message: str) -> None:
+    """Send a Telegram message via Bot API. Errors are suppressed — notification
+    failure must never affect scan state persistence."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML",
+    }
+    try:
+        import httpx
+        resp = httpx.post(url, json=payload, timeout=5.0)
+        if not resp.is_success:
+            logger.warning(
+                "Telegram notification failed",
+                status_code=resp.status_code,
+                response=resp.text[:200],
+            )
+    except Exception as exc:
+        logger.warning("Telegram notification error", error=str(exc))
 
 
 # =============================================================================
@@ -105,12 +141,32 @@ class ScanPhase(str, Enum):
     WEB_SCAN = "Web application scanning (ZAP)"
     NIKTO = "Web server scanning (Nikto)"
     SQLMAP = "SQL injection testing (SQLmap)"
+    # Dynamic Web Scanning Phases
+    WAPITI = "Web vulnerability scanning (Wapiti)"
+    DALFOX = "XSS parameter scanning (Dalfox)"
+    FEROXBUSTER = "Content discovery (Feroxbuster)"
+    COMMIX = "Command injection testing (Commix)"
+    CMSEEK = "CMS detection & analysis (CMSeeK)"
+    SNIPER = "Automated recon & attack (Sn1per)"
     # API Security Phases
     ARJUN = "Parameter discovery (Arjun)"
     GRAPHQL = "GraphQL security testing (GraphQLmap)"
     JWT_ANALYSIS = "JWT token analysis (jwt_tool)"
     API_FUZZING = "API endpoint fuzzing (wfuzz)"
     API_COLLECTION = "API collection testing (Newman)"
+    # Container Security Phases
+    DOCKER_BENCH = "Docker CIS benchmark (Docker-Bench)"
+    CLAIR = "Container vulnerability analysis (Clair)"
+    FALCO = "Runtime security monitoring (Falco)"
+    # Cloud Security Phases
+    SCOUTSUITE = "Multi-cloud security audit (ScoutSuite)"
+    PROWLER = "AWS security assessment (Prowler)"
+    # IaC Security Phases
+    CHECKOV = "IaC security scanning (Checkov)"
+    TERRASCAN = "IaC policy enforcement (Terrascan)"
+    # Kubernetes Security Phases
+    KUBE_HUNTER = "Kubernetes penetration testing (kube-hunter)"
+    KUBE_BENCH = "Kubernetes CIS benchmark (kube-bench)"
     AGGREGATING = "Aggregating results"
     REPORTING = "Generating report"
     COMPLETED = "Scan completed"
@@ -134,9 +190,10 @@ def check_system_resources() -> Dict[str, Any]:
 def update_scan_status(scan_id: str, status: str, progress: int, phase: str = None, error: str = None):
     """Update scan status in database"""
     session = SessionLocal()
+    notification_payload = None
     try:
-        from app.models.models import Scan, ScanStatus
-        
+        from app.models.models import Scan, ScanStatus, Target
+
         scan = session.query(Scan).filter(Scan.scan_id == scan_id).first()
         if scan:
             scan.status = ScanStatus(status)
@@ -149,9 +206,48 @@ def update_scan_status(scan_id: str, status: str, progress: int, phase: str = No
                 scan.started_at = datetime.utcnow()
             if status in ['completed', 'failed']:
                 scan.completed_at = datetime.utcnow()
+                # Snapshot notification data before closing session
+                target = session.query(Target).filter(Target.id == scan.target_id).first()
+                notification_payload = {
+                    'scan_id': scan_id,
+                    'status': status,
+                    'target': target.value if target else 'unknown',
+                    'total_findings': scan.total_findings or 0,
+                    'critical_count': scan.critical_count or 0,
+                    'high_count': scan.high_count or 0,
+                    'error': (error or '')[:200],
+                    'findings_are_partial': status == 'failed',
+                }
             session.commit()
     finally:
         session.close()
+
+    # Send Telegram notification after DB commit so the state is persisted
+    if notification_payload:
+        _notify_telegram_scan_complete(notification_payload)
+
+
+def _notify_telegram_scan_complete(payload: dict) -> None:
+    """Build and send a Telegram message for scan completion or failure."""
+    status = payload['status']
+    icon = '✅' if status == 'completed' else '❌'
+    lines = [
+        f"{icon} <b>Scan {status.upper()}</b>",
+        f"🔍 Target: <code>{payload['target']}</code>",
+        f"🆔 Scan ID: <code>{payload['scan_id']}</code>",
+    ]
+    if status == 'completed':
+        lines += [
+            f"📊 Total Findings: <b>{payload['total_findings']}</b>",
+            f"🔴 Critical: {payload['critical_count']}  🟠 High: {payload['high_count']}",
+        ]
+    elif status == 'failed':
+        partial_note = " (partial)" if payload['total_findings'] > 0 else ""
+        lines += [
+            f"📊 Findings before failure{partial_note}: {payload['total_findings']}",
+            f"⚠️ Error: {payload['error'] or 'Unknown error'}",
+        ]
+    send_telegram_notification('\n'.join(lines))
 
 
 def run_docker_command(container: str, command: List[str], timeout: int = 600) -> Dict[str, Any]:
@@ -603,23 +699,48 @@ def execute_scan(self, scan_id: str):
             save_tool_result(scan_id, 'zap', zap_results)
             
             # Nikto
-            update_scan_status(scan_id, 'running', 75, ScanPhase.NIKTO.value)
+            update_scan_status(scan_id, 'running', 65, ScanPhase.NIKTO.value)
             nikto_results = run_nikto_scan(context)
             save_tool_result(scan_id, 'nikto', nikto_results)
             
+            # Wapiti - web vulnerability scanner
+            update_scan_status(scan_id, 'running', 68, ScanPhase.WAPITI.value)
+            wapiti_results = run_wapiti_scan(context)
+            save_tool_result(scan_id, 'wapiti', wapiti_results)
+            
+            # Feroxbuster - content discovery
+            update_scan_status(scan_id, 'running', 71, ScanPhase.FEROXBUSTER.value)
+            feroxbuster_results = run_feroxbuster_scan(context)
+            save_tool_result(scan_id, 'feroxbuster', feroxbuster_results)
+            
+            # Dalfox - XSS parameter scanning
+            update_scan_status(scan_id, 'running', 74, ScanPhase.DALFOX.value)
+            dalfox_results = run_dalfox_scan(context)
+            save_tool_result(scan_id, 'dalfox', dalfox_results)
+            
+            # CMSeeK - CMS detection
+            update_scan_status(scan_id, 'running', 77, ScanPhase.CMSEEK.value)
+            cmseek_results = run_cmseek_scan(context)
+            save_tool_result(scan_id, 'cmseek', cmseek_results)
+            
             # SQLmap (conservative)
-            update_scan_status(scan_id, 'running', 85, ScanPhase.SQLMAP.value)
+            update_scan_status(scan_id, 'running', 80, ScanPhase.SQLMAP.value)
             sqlmap_results = run_sqlmap_scan(context)
             save_tool_result(scan_id, 'sqlmap', sqlmap_results)
+            
+            # Commix - command injection testing
+            update_scan_status(scan_id, 'running', 83, ScanPhase.COMMIX.value)
+            commix_results = run_commix_scan(context)
+            save_tool_result(scan_id, 'commix', commix_results)
+        
+        # Dynamic / Full Pentest (Sn1per runs on full scans with web targets)
+        if context.web_ports and context.scan_type == 'full':
+            update_scan_status(scan_id, 'running', 86, ScanPhase.SNIPER.value)
+            sniper_results = run_sniper_scan(context)
+            save_tool_result(scan_id, 'sniper', sniper_results)
         
         # Container Security Scanning
         if context.scan_type in ['full', 'container_only']:
-            # Trivy - Container image scanning
-            update_scan_status(scan_id, 'running', 50, ScanPhase.TRIVY.value)
-            trivy_results = run_trivy_scan(context)
-            save_tool_result(scan_id, 'trivy', trivy_results)
-            
-            # Docker Bench - CIS benchmark
             update_scan_status(scan_id, 'running', 55, ScanPhase.DOCKER_BENCH.value)
             docker_bench_results = run_docker_bench_scan(context)
             save_tool_result(scan_id, 'docker_bench', docker_bench_results)
@@ -1080,50 +1201,352 @@ def run_sqlmap_scan(context: ScanContext) -> Dict[str, Any]:
 
 
 # =============================================================================
-# CONTAINER SECURITY TOOL FUNCTIONS
+# DYNAMIC WEB SCANNING TOOL FUNCTIONS
 # =============================================================================
-def run_trivy_scan(context: ScanContext) -> Dict[str, Any]:
-    """Execute Trivy container image vulnerability scan"""
-    logger.info("Running Trivy scan", target=context.target)
-    
-    output_file = f"{context.results_dir}/trivy.json"
-    
-    trivy_cmd = [
-        'trivy', 'image',
-        '--format', 'json',
-        '--output', output_file,
-        '--severity', 'CRITICAL,HIGH,MEDIUM',
-        '--timeout', '10m',
-        context.target
+
+def run_wapiti_scan(context: ScanContext) -> Dict[str, Any]:
+    """Execute Wapiti web application vulnerability scan"""
+    logger.info("Running Wapiti scan", target=context.target)
+
+    if context.target.startswith('http'):
+        target_url = context.target
+    elif context.web_ports:
+        port = context.web_ports[0]
+        scheme = 'https' if port == 443 else 'http'
+        target_url = f"{scheme}://{context.target}:{port}"
+    else:
+        return {'findings': [], 'message': 'No web target for Wapiti'}
+
+    output_file = f"{context.results_dir}/wapiti.json"
+
+    wapiti_cmd = [
+        'wapiti',
+        '-u', target_url,
+        '-f', 'json',
+        '-o', output_file,
+        '--scope', 'domain',
+        '--max-links-per-page', '50',
+        '--max-scan-time', '600',
+        '--flush-session',
     ]
-    
-    result = run_docker_command('noovastack-trivy', trivy_cmd, timeout=900)
-    
+
+    result = run_docker_command('noovastack-wapiti', wapiti_cmd, timeout=720)
+
     findings = []
     try:
         if os.path.exists(output_file):
             with open(output_file, 'r') as f:
-                trivy_data = json.load(f)
-            
-            for result_item in trivy_data.get('Results', []):
-                for vuln in result_item.get('Vulnerabilities', []):
+                wapiti_data = json.load(f)
+            vuln_map = {
+                'Blind SQL Injection': ('critical', 'sqli'),
+                'SQL Injection': ('critical', 'sqli'),
+                'Cross Site Scripting': ('high', 'xss'),
+                'Reflected Cross Site Scripting': ('high', 'xss'),
+                'Stored Cross Site Scripting': ('high', 'xss'),
+                'Command execution': ('critical', 'cmdi'),
+                'Path Traversal': ('high', 'path_traversal'),
+                'Open Redirect': ('medium', 'redirect'),
+                'CSRF': ('medium', 'csrf'),
+                'SSRF': ('high', 'ssrf'),
+                'XXE': ('high', 'xxe'),
+                'HTTP Header Injection': ('medium', 'header_injection'),
+                'Backup file': ('low', 'info_disclosure'),
+            }
+            for vuln_name, vuln_list in wapiti_data.get('vulnerabilities', {}).items():
+                severity, category = vuln_map.get(vuln_name, ('medium', 'web'))
+                for vuln in vuln_list:
                     findings.append({
-                        'title': f"{vuln.get('VulnerabilityID', 'Unknown')}: {vuln.get('PkgName', '')}",
-                        'description': vuln.get('Description', ''),
-                        'severity': vuln.get('Severity', 'medium').lower(),
-                        'cve_id': vuln.get('VulnerabilityID'),
-                        'cvss_score': vuln.get('CVSS', {}).get('nvd', {}).get('V3Score'),
-                        'affected_component': f"{vuln.get('PkgName', '')}:{vuln.get('InstalledVersion', '')}",
-                        'solution': f"Upgrade to {vuln.get('FixedVersion', 'N/A')}",
-                        'references': vuln.get('References', []),
-                        'tool_name': 'trivy'
+                        'title': vuln_name,
+                        'description': vuln.get('info', vuln_name),
+                        'severity': severity,
+                        'affected_url': vuln.get('path', target_url),
+                        'tool_name': 'wapiti',
+                        'evidence': vuln.get('curl_command', ''),
+                        'category': category,
                     })
     except Exception as e:
-        logger.error("Failed to parse Trivy output", error=str(e))
-    
+        logger.error("Failed to parse Wapiti output", error=str(e))
+
     return {'findings': findings, 'raw_output': result.get('stdout', '')}
 
 
+def run_dalfox_scan(context: ScanContext) -> Dict[str, Any]:
+    """Execute Dalfox XSS parameter scanning"""
+    logger.info("Running Dalfox scan", target=context.target)
+
+    if context.target.startswith('http'):
+        target_url = context.target
+    elif context.web_ports:
+        port = context.web_ports[0]
+        scheme = 'https' if port == 443 else 'http'
+        target_url = f"{scheme}://{context.target}:{port}"
+    else:
+        return {'findings': [], 'message': 'No web target for Dalfox'}
+
+    output_file = f"{context.results_dir}/dalfox.json"
+
+    dalfox_cmd = [
+        'dalfox', 'url', target_url,
+        '--format', 'json',
+        '--output', output_file,
+        '--silence',
+        '--timeout', '30',
+        '--delay', '200',
+        '--follow-redirects',
+    ]
+
+    result = run_docker_command('noovastack-dalfox', dalfox_cmd, timeout=600)
+
+    findings = []
+    try:
+        if os.path.exists(output_file):
+            with open(output_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                        findings.append({
+                            'title': 'Cross-Site Scripting (XSS)',
+                            'description': item.get('message', 'Dalfox detected an XSS vulnerability.'),
+                            'severity': 'high',
+                            'affected_url': item.get('data', target_url),
+                            'tool_name': 'dalfox',
+                            'evidence': item.get('param', ''),
+                            'category': 'xss',
+                        })
+                    except json.JSONDecodeError:
+                        pass
+    except Exception as e:
+        logger.error("Failed to parse Dalfox output", error=str(e))
+
+    return {'findings': findings, 'raw_output': result.get('stdout', '')}
+
+
+def run_feroxbuster_scan(context: ScanContext) -> Dict[str, Any]:
+    """Execute Feroxbuster content discovery scan"""
+    logger.info("Running Feroxbuster scan", target=context.target)
+
+    if context.target.startswith('http'):
+        target_url = context.target
+    elif context.web_ports:
+        port = context.web_ports[0]
+        scheme = 'https' if port == 443 else 'http'
+        target_url = f"{scheme}://{context.target}:{port}"
+    else:
+        return {'findings': [], 'message': 'No web target for Feroxbuster'}
+
+    output_file = f"{context.results_dir}/feroxbuster.json"
+
+    feroxbuster_cmd = [
+        'feroxbuster',
+        '--url', target_url,
+        '--wordlist', '/wordlists/api-endpoints.txt',
+        '--output', output_file,
+        '--json',
+        '--silent',
+        '--timeout', '10',
+        '--rate-limit', '50',
+        '--depth', '2',
+        '--threads', '10',
+        '--no-recursion',
+    ]
+
+    result = run_docker_command('noovastack-feroxbuster', feroxbuster_cmd, timeout=600)
+
+    findings = []
+    try:
+        if os.path.exists(output_file):
+            with open(output_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                        if item.get('type') == 'response':
+                            status = item.get('status', 0)
+                            url = item.get('url', '')
+                            # Flag sensitive endpoints
+                            sensitive_patterns = [
+                                'admin', 'backup', 'config', '.env', 'debug',
+                                'swagger', 'api-docs', 'phpinfo', 'actuator',
+                            ]
+                            if any(p in url.lower() for p in sensitive_patterns):
+                                findings.append({
+                                    'title': f'Sensitive Endpoint Discovered: {url}',
+                                    'description': f'Feroxbuster found an accessible endpoint that may expose sensitive functionality. HTTP {status}.',
+                                    'severity': 'medium' if status == 200 else 'low',
+                                    'affected_url': url,
+                                    'tool_name': 'feroxbuster',
+                                    'evidence': f'HTTP {status} - {url}',
+                                    'category': 'info_disclosure',
+                                })
+                    except json.JSONDecodeError:
+                        pass
+    except Exception as e:
+        logger.error("Failed to parse Feroxbuster output", error=str(e))
+
+    return {'findings': findings, 'raw_output': result.get('stdout', '')}
+
+
+def run_commix_scan(context: ScanContext) -> Dict[str, Any]:
+    """Execute Commix OS command injection testing"""
+    logger.info("Running Commix scan", target=context.target)
+
+    if context.target.startswith('http'):
+        target_url = context.target
+    elif context.web_ports:
+        port = context.web_ports[0]
+        scheme = 'https' if port == 443 else 'http'
+        target_url = f"{scheme}://{context.target}:{port}"
+    else:
+        return {'findings': [], 'message': 'No web target for Commix'}
+
+    output_file = f"{context.results_dir}/commix.log"
+
+    commix_cmd = [
+        'python3', '/opt/commix/commix.py',
+        '--url', target_url,
+        '--batch',
+        '--crawl=1',
+        '--output-dir', context.results_dir,
+        '--timeout=15',
+        '--retries=1',
+    ]
+
+    result = run_docker_command('noovastack-commix', commix_cmd, timeout=600)
+
+    findings = []
+    stdout = result.get('stdout', '')
+    if 'is vulnerable' in stdout.lower() or 'backdoor' in stdout.lower():
+        findings.append({
+            'title': 'OS Command Injection Vulnerability',
+            'description': 'Commix detected a potential OS command injection vulnerability. An attacker may be able to execute arbitrary system commands.',
+            'severity': 'critical',
+            'affected_url': target_url,
+            'tool_name': 'commix',
+            'evidence': stdout[-2000:],
+            'category': 'cmdi',
+        })
+
+    return {'findings': findings, 'raw_output': stdout}
+
+
+def run_cmseek_scan(context: ScanContext) -> Dict[str, Any]:
+    """Execute CMSeeK CMS detection and vulnerability analysis"""
+    logger.info("Running CMSeeK scan", target=context.target)
+
+    if context.target.startswith('http'):
+        target_url = context.target
+    elif context.web_ports:
+        port = context.web_ports[0]
+        scheme = 'https' if port == 443 else 'http'
+        target_url = f"{scheme}://{context.target}:{port}"
+    else:
+        return {'findings': [], 'message': 'No web target for CMSeeK'}
+
+    results_dir = f"{context.results_dir}/cmseek"
+
+    cmseek_cmd = [
+        'python3', '/opt/cmseek/cmseek.py',
+        '-u', target_url,
+        '--batch',
+        '--follow-redirect',
+        '--output-json', results_dir,
+    ]
+
+    result = run_docker_command('noovastack-cmseek', cmseek_cmd, timeout=300)
+
+    findings = []
+    try:
+        result_file = os.path.join(results_dir, 'cms.json')
+        if os.path.exists(result_file):
+            with open(result_file, 'r') as f:
+                cms_data = json.load(f)
+
+            cms_id = cms_data.get('cms_id', 'unknown')
+            cms_name = cms_data.get('cms_name', cms_id)
+
+            if cms_id and cms_id != 'unknown':
+                findings.append({
+                    'title': f'CMS Detected: {cms_name}',
+                    'description': f'CMSeeK identified {cms_name} as the content management system. Version: {cms_data.get("cms_version", "unknown")}.',
+                    'severity': 'info',
+                    'affected_url': target_url,
+                    'tool_name': 'cmseek',
+                    'evidence': json.dumps(cms_data, indent=2)[:1000],
+                    'category': 'info_disclosure',
+                })
+
+            for vuln in cms_data.get('vulnerabilities', []):
+                findings.append({
+                    'title': vuln.get('name', 'CMS Vulnerability'),
+                    'description': vuln.get('description', ''),
+                    'severity': vuln.get('severity', 'medium').lower(),
+                    'affected_url': target_url,
+                    'tool_name': 'cmseek',
+                    'cve_id': vuln.get('cve'),
+                    'category': 'cms_vuln',
+                })
+    except Exception as e:
+        logger.error("Failed to parse CMSeeK output", error=str(e))
+
+    return {'findings': findings, 'raw_output': result.get('stdout', '')}
+
+
+def run_sniper_scan(context: ScanContext) -> Dict[str, Any]:
+    """Execute Sn1per automated recon and attack framework"""
+    logger.info("Running Sn1per scan", target=context.target)
+
+    # Determine target (hostname/IP only, no scheme)
+    target = context.target
+    if target.startswith('http://') or target.startswith('https://'):
+        from urllib.parse import urlparse
+        target = urlparse(target).hostname or context.target
+
+    output_dir = f"{context.results_dir}/sniper"
+
+    sniper_cmd = [
+        'sniper',
+        '-t', target,
+        '-m', 'web',       # Web mode — web-focused recon
+        '-o', '-x',        # Output to file, non-interactive
+    ]
+
+    result = run_docker_command('noovastack-sniper', sniper_cmd, timeout=900)
+
+    findings = []
+    stdout = result.get('stdout', '')
+
+    # Parse key finding indicators from Sn1per output
+    import re
+    vuln_patterns = [
+        (r'\[VULN\]\s+(.+)', 'high', 'vulnerability'),
+        (r'\[HIGH\]\s+(.+)', 'high', 'vulnerability'),
+        (r'\[MEDIUM\]\s+(.+)', 'medium', 'vulnerability'),
+        (r'\[LOW\]\s+(.+)', 'low', 'vulnerability'),
+        (r'CVE-\d{4}-\d+', 'medium', 'cve'),
+    ]
+    for pattern, severity, category in vuln_patterns:
+        for match in re.finditer(pattern, stdout, re.IGNORECASE):
+            findings.append({
+                'title': f'Sn1per Finding: {match.group(0)[:120]}',
+                'description': match.group(0),
+                'severity': severity,
+                'affected_url': target,
+                'tool_name': 'sniper',
+                'evidence': match.group(0),
+                'category': category,
+            })
+
+    return {'findings': findings, 'raw_output': stdout}
+
+
+# =============================================================================
+# CONTAINER SECURITY TOOL FUNCTIONS
+# =============================================================================
 def run_docker_bench_scan(context: ScanContext) -> Dict[str, Any]:
     """Execute Docker Bench Security CIS benchmark"""
     logger.info("Running Docker Bench scan")

@@ -16,6 +16,11 @@ from sqlalchemy.sql import func
 from app.core.database import Base
 
 
+def enum_values(enum_cls):
+    """Persist enum .value strings to match PostgreSQL enum definitions."""
+    return [member.value for member in enum_cls]
+
+
 class UserRole(str, PyEnum):
     """User role enumeration"""
     ADMIN = "admin"
@@ -88,7 +93,11 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     username = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    role = Column(Enum(UserRole), default=UserRole.USER, nullable=False)
+    role = Column(
+        Enum(UserRole, name="user_role", values_callable=enum_values),
+        default=UserRole.USER,
+        nullable=False,
+    )
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     
@@ -115,9 +124,15 @@ class Target(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     value = Column(String(500), nullable=False, index=True)  # IP, domain, or URL
-    target_type = Column(Enum(TargetType), nullable=False)
+    target_type = Column(
+        Enum(TargetType, name="target_type", values_callable=enum_values),
+        nullable=False,
+    )
     is_external = Column(Boolean, default=False)
-    approval_status = Column(Enum(ApprovalStatus), default=ApprovalStatus.PENDING)
+    approval_status = Column(
+        Enum(ApprovalStatus, name="approval_status", values_callable=enum_values),
+        default=ApprovalStatus.PENDING,
+    )
     approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at = Column(DateTime(timezone=True))
     
@@ -147,8 +162,15 @@ class Scan(Base):
     target_id = Column(Integer, ForeignKey("targets.id"), nullable=False)
     
     # Scan Configuration
-    scan_type = Column(Enum(ScanType), default=ScanType.FULL)
-    status = Column(Enum(ScanStatus), default=ScanStatus.PENDING, index=True)
+    scan_type = Column(
+        Enum(ScanType, name="scan_type", values_callable=enum_values),
+        default=ScanType.FULL,
+    )
+    status = Column(
+        Enum(ScanStatus, name="scan_status", values_callable=enum_values),
+        default=ScanStatus.PENDING,
+        index=True,
+    )
     priority = Column(Integer, default=5)  # 1-10, lower = higher priority
     
     # Progress Tracking
@@ -205,7 +227,11 @@ class Finding(Base):
     # Vulnerability Details
     title = Column(String(500), nullable=False)
     description = Column(Text)
-    severity = Column(Enum(Severity), nullable=False, index=True)
+    severity = Column(
+        Enum(Severity, name="severity", values_callable=enum_values),
+        nullable=False,
+        index=True,
+    )
     
     # CVE Information
     cve_id = Column(String(50), index=True)

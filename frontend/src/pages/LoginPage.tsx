@@ -38,7 +38,7 @@ const LoginPage: React.FC = () => {
     mutationFn: () => authApi.login(username, password),
     onSuccess: async (data) => {
       // Get user info
-      const userResponse = await authApi.getMe();
+      const userResponse = await authApi.getMe(data.access_token);
       login(userResponse, data.access_token);
       navigate(from, { replace: true });
     },
@@ -103,7 +103,7 @@ const LoginPage: React.FC = () => {
           <form onSubmit={handleSubmit}>
             <Stack spacing={3}>
               <TextField
-                label="Username"
+                label="Email or Username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 fullWidth
@@ -158,7 +158,7 @@ const LoginPage: React.FC = () => {
             display="block"
             mt={4}
           >
-            Default credentials: admin / ChangeMe123!
+            Default credentials: admin / admin123
           </Typography>
         </CardContent>
       </Card>

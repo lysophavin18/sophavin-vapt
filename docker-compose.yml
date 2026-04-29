@@ -2,8 +2,6 @@
 # Version: 1.0.0
 # Author: Noovastack Security Team
 
-version: '3.9'
-
 # ============================================================================
 # NETWORKS - Isolated network segments for security
 # ============================================================================
@@ -12,20 +10,20 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.0.0/24
+        - subnet: 172.20.0.0/24
   
   noovastack-backend:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.1.0/24
+        - subnet: 172.20.1.0/24
   
   noovastack-scanners:
     driver: bridge
     internal: true  # No external access - isolated scanner network
     ipam:
       config:
-        - subnet: 172.28.2.0/24
+        - subnet: 172.20.2.0/24
 
 # ============================================================================
 # VOLUMES - Persistent storage
@@ -44,8 +42,6 @@ volumes:
   nuclei_templates:
     driver: local
   # Container security volumes
-  trivy_cache:
-    driver: local
   clair_data:
     driver: local
   # Cloud/IaC scanning volumes
@@ -64,14 +60,16 @@ services:
     container_name: noovastack-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "8888:80"
+      - "8453:443"
     volumes:
       - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./configs/nginx/locations.conf:/etc/nginx/conf.d/locations.conf:ro
       - ./configs/nginx/ssl:/etc/nginx/ssl:ro
       - ./frontend/build:/usr/share/nginx/html:ro
     networks:
       - noovastack-frontend
+      - noovastack-backend
     depends_on:
       - frontend
       - backend
@@ -95,13 +93,16 @@ services:
       dockerfile: Dockerfile
     container_name: noovastack-frontend
     restart: unless-stopped
+    ports:
+      - "3003:3003"
     environment:
-      - REACT_APP_API_URL=/api
+      - VITE_API_URL=
       - NODE_ENV=production
     networks:
       - noovastack-frontend
+      - noovastack-backend
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3003"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -120,8 +121,10 @@ services:
       dockerfile: Dockerfile
     container_name: noovastack-backend
     restart: unless-stopped
+    ports:
+      - "5000:5000"
     environment:
-      - DATABASE_URL=postgresql://noovastack:${DB_PASSWORD}@postgres:5432/noovastack_vapt
+      - DATABASE_URL=postgresql+asyncpg://noovastack:${DB_PASSWORD}@postgres:5432/noovastack_vapt
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET=${JWT_SECRET}
@@ -142,7 +145,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -214,7 +217,7 @@ services:
     restart: unless-stopped
     command: celery -A tasks worker --loglevel=INFO --concurrency=2 -Q scans,high_priority
     environment:
-      - DATABASE_URL=postgresql://noovastack:${DB_PASSWORD}@postgres:5432/noovastack_vapt
+      - DATABASE_URL=postgresql+asyncpg://noovastack:${DB_PASSWORD}@postgres:5432/noovastack_vapt
       - REDIS_URL=redis://redis:6379/0
       - OPENVAS_HOST=openvas
       - OPENVAS_PORT=9392
@@ -226,6 +229,8 @@ services:
       - MAX_CPU_PERCENT=80
       - MAX_RAM_PERCENT=85
       - SCAN_TIMEOUT=7200
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
     volumes:
       - scan_results:/app/results
       - reports:/app/reports
@@ -256,6 +261,7 @@ services:
     command: celery -A tasks beat --loglevel=INFO
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://noovastack:SecurePassword123!@postgres:5432/noovastack
     networks:
       - noovastack-backend
     depends_on:
@@ -270,7 +276,7 @@ services:
   # OPENVAS / GREENBONE - Network Vulnerability Scanner
   # --------------------------------------------------------------------------
   openvas:
-    image: greenbone/community-container:stable
+    image: immauss/openvas:latest
     container_name: noovastack-openvas
     restart: unless-stopped
     environment:
@@ -365,7 +371,9 @@ services:
   # NIKTO - Web Server Scanner
   # --------------------------------------------------------------------------
   nikto:
-    image: sullo/nikto:latest
+    build:
+      context: ./dockerfiles/nikto
+      dockerfile: Dockerfile
     container_name: noovastack-nikto
     restart: unless-stopped
     entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
@@ -383,7 +391,9 @@ services:
   # SQLMAP - SQL Injection Scanner
   # --------------------------------------------------------------------------
   sqlmap:
-    image: paoloo/sqlmap:latest
+    build:
+      context: ./dockerfiles/sqlmap
+      dockerfile: Dockerfile
     container_name: noovastack-sqlmap
     restart: unless-stopped
     entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
@@ -398,21 +408,39 @@ services:
           memory: 1G
 
   # ==========================================================================
-  # CONTAINER SECURITY TOOLS
+  # DYNAMIC WEB APPLICATION SECURITY TOOLS
   # ==========================================================================
 
   # --------------------------------------------------------------------------
-  # TRIVY - Container Image Vulnerability Scanner
+  # WAPITI - Web Application Vulnerability Scanner
   # --------------------------------------------------------------------------
-  trivy:
-    image: aquasec/trivy:latest
-    container_name: noovastack-trivy
+  wapiti:
+    build:
+      context: ./dockerfiles/wapiti
+      dockerfile: Dockerfile
+    container_name: noovastack-wapiti
     restart: unless-stopped
     entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
     volumes:
       - scan_results:/results
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - trivy_cache:/root/.cache
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+
+  # --------------------------------------------------------------------------
+  # SN1PER - Automated Pentest Recon & Attack Framework
+  # --------------------------------------------------------------------------
+  sniper:
+    image: xer0dayz/sn1per:latest
+    container_name: noovastack-sniper
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
     networks:
       - noovastack-scanners
     deploy:
@@ -420,6 +448,87 @@ services:
         limits:
           cpus: '2'
           memory: 2G
+
+  # --------------------------------------------------------------------------
+  # CMSEEK - CMS Detection & Exploitation Suite
+  # --------------------------------------------------------------------------
+  cmseek:
+    build:
+      context: ./dockerfiles/cmseek
+      dockerfile: Dockerfile
+    container_name: noovastack-cmseek
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # DALFOX - Parameter-Based XSS Scanner
+  # --------------------------------------------------------------------------
+  dalfox:
+    image: ghcr.io/hahwul/dalfox:latest
+    container_name: noovastack-dalfox
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # FEROXBUSTER - Fast Content Discovery / Directory Bruteforce
+  # --------------------------------------------------------------------------
+  feroxbuster:
+    image: epi052/feroxbuster:latest
+    container_name: noovastack-feroxbuster
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+      - ./configs/wfuzz/wordlists:/wordlists:ro
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # --------------------------------------------------------------------------
+  # COMMIX - OS Command Injection Testing
+  # --------------------------------------------------------------------------
+  commix:
+    build:
+      context: ./dockerfiles/commix
+      dockerfile: Dockerfile
+    container_name: noovastack-commix
+    restart: unless-stopped
+    entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator
+    volumes:
+      - scan_results:/results
+    networks:
+      - noovastack-scanners
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # ==========================================================================
+  # CONTAINER SECURITY TOOLS
+  # ==========================================================================
 
   # --------------------------------------------------------------------------
   # DOCKER-BENCH - CIS Docker Benchmark Security Audit
@@ -649,7 +758,9 @@ services:
   # ARJUN - HTTP Parameter Discovery
   # --------------------------------------------------------------------------
   arjun:
-    image: s0md3v/arjun:latest
+    build:
+      context: ./dockerfiles/arjun
+      dockerfile: Dockerfile
     container_name: noovastack-arjun
     restart: unless-stopped
     entrypoint: ["tail", "-f", "/dev/null"]  # Keep alive, invoked by orchestrator

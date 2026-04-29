@@ -90,8 +90,8 @@ const StatusChip: React.FC<{ status: string }> = ({ status }) => {
     <Chip
       size="small"
       label={status.charAt(0).toUpperCase() + status.slice(1)}
-      color={config.color}
-      icon={config.icon}
+      color={config.color as any}
+      icon={config.icon as React.ReactElement}
     />
   );
 };

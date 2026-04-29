@@ -4,6 +4,7 @@ Request/Response validation models
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, EmailStr, validator
 import re
@@ -48,7 +49,7 @@ class TokenResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     """Login request schema"""
-    email: EmailStr
+    email: str
     password: str = Field(..., min_length=8)
 
 

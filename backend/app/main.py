@@ -14,7 +14,7 @@ from starlette.responses import Response
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api import auth, scans, reports, users, admin, health, batch_scans, ai, cve
+from app.api import auth, scans, reports, users, admin, health, batch_scans, ai, cve, dashboard
 from app.core.middleware import RateLimitMiddleware, AuditLogMiddleware
 
 # Configure structured logging
@@ -124,6 +124,7 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(ai.router, prefix="/api/v1/ai", tags=["AI Assistant"])
 app.include_router(cve.router, prefix="/api/v1/cve", tags=["CVE Database"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 
 
 @app.get("/health")
