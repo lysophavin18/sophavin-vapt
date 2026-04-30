@@ -78,7 +78,7 @@ const SettingsPage: React.FC = () => {
   const updateProfileMutation = useMutation({
     mutationFn: (data: { email: string }) =>
       api.patch('/api/v1/users/me', data),
-    onSuccess: (response: { data: any }) => {
+    onSuccess: (response) => {
       updateUser(response.data);
       setSnackbar({ open: true, message: 'Profile updated successfully', severity: 'success' });
     },
