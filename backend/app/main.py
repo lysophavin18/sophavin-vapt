@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT Backend API
+Kouprey Security Backend API
 Main Application Entry Point
 """
 
@@ -34,14 +34,14 @@ structlog.configure(
 logger = structlog.get_logger()
 
 # Prometheus metrics
-REQUEST_COUNT = Counter('noovastack_requests_total', 'Total requests', ['method', 'endpoint', 'status'])
-REQUEST_LATENCY = Histogram('noovastack_request_latency_seconds', 'Request latency', ['method', 'endpoint'])
+REQUEST_COUNT = Counter('kouprey_requests_total', 'Total requests', ['method', 'endpoint', 'status'])
+REQUEST_LATENCY = Histogram('kouprey_request_latency_seconds', 'Request latency', ['method', 'endpoint'])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    logger.info("Starting Noovastack-VAPT Backend", version=settings.VERSION)
+    logger.info("Starting Kouprey Security Backend", version=settings.VERSION)
     
     # Create database tables
     async with engine.begin() as conn:
@@ -49,13 +49,13 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    logger.info("Shutting down Noovastack-VAPT Backend")
+    logger.info("Shutting down Kouprey Security Backend")
     await engine.dispose()
 
 
 # Create FastAPI application
 app = FastAPI(
-    title="Noovastack-VAPT API",
+    title="Kouprey Security API",
     description="Vulnerability Assessment and Penetration Testing Platform API",
     version=settings.VERSION,
     docs_url="/api/docs" if settings.ENVIRONMENT != "production" else None,
@@ -130,7 +130,7 @@ app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboar
 @app.get("/health")
 async def root_health():
     """Root health check for load balancers"""
-    return {"status": "healthy", "service": "noovastack-vapt-backend"}
+    return {"status": "healthy", "service": "kouprey-security-backend"}
 
 
 @app.get("/metrics")

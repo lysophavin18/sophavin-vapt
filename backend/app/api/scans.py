@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT Scan API Endpoints
+Kouprey Security Scan API Endpoints
 Core scanning functionality
 """
 

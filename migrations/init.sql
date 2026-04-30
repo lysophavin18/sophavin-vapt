@@ -1,5 +1,5 @@
 -- ============================================================================
--- NOOVASTACK-VAPT DATABASE SCHEMA
+-- KOU PREY SECURITY DATABASE SCHEMA
 -- PostgreSQL 16+
 -- ============================================================================
 
@@ -207,7 +207,7 @@ CREATE INDEX idx_sessions_expires ON user_sessions(expires_at);
 -- Create default admin user (password: 'admin123' - CHANGE IN PRODUCTION!)
 INSERT INTO users (email, username, hashed_password, role, is_active, is_verified, full_name)
 VALUES (
-    'admin@noovastack.local',
+    'admin@kouprey.local',
     'admin',
     '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4Iu2T3XF.Z1rVsEO',  -- bcrypt hash of 'admin123'
     'admin',

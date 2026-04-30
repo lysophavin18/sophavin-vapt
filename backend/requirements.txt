@@ -1,4 +1,4 @@
-# Noovastack-VAPT Backend
+# Kouprey Security Backend
 # FastAPI Application
 
 fastapi==0.109.0

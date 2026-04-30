@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT CVE Service
+Kouprey Security CVE Service
 CVE database integration for vulnerability enrichment
 """
 

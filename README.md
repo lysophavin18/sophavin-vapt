@@ -1,4 +1,4 @@
-# S VAPT Platform
+# Kouprey Security Platform
 
 > **Enterprise-Grade Vulnerability Assessment and Penetration Testing Platform**
 
@@ -99,8 +99,8 @@ AI_TEMPERATURE=0.3
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/sophavin-vapt.git
-cd sophavin-vapt
+git clone https://github.com/your-org/kouprey-security.git
+cd kouprey-security
 
 # Configure environment
 cp .env.example .env
@@ -167,7 +167,7 @@ docker compose ps
 ## Project Structure
 
 ```
-noovastack-vapt/
+kouprey-security/
 ├── backend/              # FastAPI application
 │   ├── app/
 │   │   ├── api/          # API endpoints

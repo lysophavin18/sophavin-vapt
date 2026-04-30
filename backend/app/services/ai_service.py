@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT AI Service
+Kouprey Security AI Service
 Multi-provider AI integration for intelligent vulnerability analysis
 """
 
@@ -289,7 +289,7 @@ class AIService:
     
     # System prompts for different analysis types
     SYSTEM_PROMPTS = {
-        "scan_analysis": """You are an expert cybersecurity analyst assistant integrated into Noovastack-VAPT, a vulnerability assessment platform. Your role is to:
+        "scan_analysis": """You are an expert cybersecurity analyst assistant integrated into Kouprey Security, a vulnerability assessment platform. Your role is to:
 
 1. Analyze vulnerability scan results and provide actionable insights
 2. Prioritize findings based on exploitability, impact, and business context
@@ -331,7 +331,7 @@ Always include commands for common platforms (Linux, Windows, major cloud provid
 
 Use professional language suitable for board presentations.""",
 
-        "chat": """You are a helpful cybersecurity assistant for the Noovastack-VAPT platform. Help users:
+        "chat": """You are a helpful cybersecurity assistant for the Kouprey Security platform. Help users:
 1. Understand scan results and findings
 2. Navigate the platform features
 3. Configure scans for their needs

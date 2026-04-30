@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-LABEL maintainer="Noovastack-VAPT"
+LABEL maintainer="Kouprey Security"
 LABEL description="GraphQLmap - GraphQL Penetration Testing Tool"
 
 # Install dependencies

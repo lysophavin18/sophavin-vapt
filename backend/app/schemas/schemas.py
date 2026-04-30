@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT Pydantic Schemas
+Kouprey Security Pydantic Schemas
 Request/Response validation models
 """
 

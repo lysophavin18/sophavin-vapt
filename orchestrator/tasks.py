@@ -24,7 +24,7 @@ import xmltodict
 
 # Initialize Celery
 celery_app = Celery(
-    'noovastack',
+    'kouprey',
     broker=os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
     backend=os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 )
@@ -861,7 +861,7 @@ def run_nmap_scan(context: ScanContext) -> Dict[str, Any]:
         context.target
     ]
     
-    result = run_docker_command('noovastack-nmap', nmap_cmd, timeout=900)
+    result = run_docker_command('kouprey-nmap', nmap_cmd, timeout=900)
     
     if not result['success']:
         return {'error': result['stderr']}
@@ -921,7 +921,7 @@ def run_openvas_scan(context: ScanContext) -> Dict[str, Any]:
             
             # Create target
             target_id = gmp.create_target(
-                name=f"noovastack-{context.scan_id}",
+                name=f"kouprey-{context.scan_id}",
                 hosts=[context.target],
                 port_list_id="33d0cd82-57c6-11e1-8ed1-406186ea4fc5"  # All IANA assigned TCP
             )

@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT Configuration
+Kouprey Security Configuration
 Environment-based settings management
 """
 
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://noovastack:password@localhost:5432/noovastack_vapt",
+        default="postgresql+asyncpg://kouprey:password@localhost:5432/kouprey_vapt",
         env="DATABASE_URL"
     )
     

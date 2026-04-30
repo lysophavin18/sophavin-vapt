@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Noovastack-VAPT Default API Security Collection",
+    "name": "Kouprey Security Default API Security Collection",
     "description": "Default API security tests for common vulnerabilities",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },

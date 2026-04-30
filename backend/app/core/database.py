@@ -1,5 +1,5 @@
 """
-Noovastack-VAPT Database Configuration
+Kouprey Security Database Configuration
 Async SQLAlchemy setup with PostgreSQL
 """
 
